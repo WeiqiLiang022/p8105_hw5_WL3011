@@ -12,6 +12,7 @@ library(tidyverse)
 library(ggplot2)
 library(broom)
 library(dplyr)
+library(purrr)
 set.seed(1)
 ```
 
@@ -53,13 +54,15 @@ sim_res |>
 
 ```
 
+As the group size increases, the probability that at least two people share the same birthday increases rapidly. When the group size is about 23 people, the probability is closer to 0.5 (50%), meaning that in a group of 23 people, there is a 50% chance that at least two people will have the same birthday. When the group size approaches 50 people, the probability approaches 1 (100%), indicating that it is almost certain that at least two people in such a group will share a birthday.
+
 ## Problem 2
 
 ```{r}
 # Simulation parameters
 n = 30
 sigma = 5
-iter = 50
+iter = 5000
 alpha = 0.05
 mu_values = 1:6
 
@@ -79,8 +82,6 @@ for (mu in mu_values) {
   
   results = bind_rows(results, simulations)
 }
-
-
 ```
 
 ```{r}
@@ -103,6 +104,7 @@ ggplot(power_res, aes(x = mu, y = power)) +
   theme_minimal()
 ```
 
+This figure shows the relationship between statistical power of the t-test and the truth value of $\mu$. When $\mu = 1$, the power is lower than 0.25, indicating that the test is difficult to detect the difference. With the increase of $\mu$, the efficacy increases rapidly. When mu reaches 4 and above, the efficacy reaches 1 (100%), indicating that the test almost always correctly rejects the null hypothesis under these conditions.
 
 ```{r}
 estimate_data = results |>
@@ -114,6 +116,8 @@ estimate_data = results |>
 
 # Plot average estimate of mu vs. true value of mu for all samples
 ggplot(estimate_data, aes(x = mu)) +
+  geom_point(aes(y = avg_estimate_all)) +
+  geom_point(aes(y = avg_estimate_rejected)) +
   geom_line(aes(y = avg_estimate_all, color = "All Samples")) +
   geom_line(aes(y = avg_estimate_rejected, color = "Null Rejected")) +
   labs(
@@ -131,5 +135,73 @@ ggplot(estimate_data, aes(x = mu)) +
   theme_minimal()
 ```
 
-When considering only samples that reject the null hypothesis, the average estimate $\hat\mu$ will generally deviate from the true value $\mu$. This is because in the case where the null hypothesis is rejected, a larger $\hat\mu$ may be favored due to selection bias.
+The sample average of $\hat\mu$ across tests for which the null is rejected approximately not equal to the true value of $\mu$. When considering only samples that reject the null hypothesis, the average estimate $\hat\mu$ will generally deviate from the true value $\mu$. This is because in the case where the null hypothesis is rejected, a larger $\hat\mu$ may be favored due to selection bias.
+
+## Problem 3
+
+```{r message=FALSE}
+homicide_data = read_csv("./homicide-data.csv", 
+           na = c("NA", ".", "")) |>
+           janitor::clean_names() |>
+  mutate(city_state = paste(city, state, sep = ", ")) |>
+  group_by(city_state) |>
+  summarize(
+    total_homicides = n(),
+    unsolved_homicides = sum(disposition %in% c("Closed without arrest", "Open/No arrest"))
+  )
+
+baltimore_data =
+  homicide_data |>
+  filter(city_state == "Baltimore, MD")
+
+baltimore_prop_test =
+  prop.test(
+  baltimore_data |> pull(unsolved_homicides),
+  baltimore_data |> pull(total_homicides)
+)
+
+baltimore_result = 
+  tidy(baltimore_prop_test) |>
+  mutate(
+    estimate_mu = estimate,
+    CI = paste0("(", round(conf.low, 4), ", ", round(conf.high, 4), ")")
+  ) |>
+  select(estimate_mu, CI)
+```
+
+```{r}
+knitr::kable(baltimore_result)
+```
+
+
+```{r warning=FALSE}
+city_result = homicide_data |>
+  mutate(
+    prop_test = map2(unsolved_homicides, total_homicides, ~ prop.test(.x, .y) |> tidy())
+  ) |>
+  unnest(prop_test) |>
+  select(city_state, estimate, conf.low, conf.high)
+
+city_result_table = city_result |>
+  mutate(
+    ci = paste0("(", round(conf.low, 4), ", ", round(conf.high, 4), ")")
+  ) |>
+  select(city_state, estimate, ci)
+```
+
+```{r fig.width = 10, fig.height = 8}
+ggplot(city_result, aes(x = reorder(city_state, estimate), y = estimate)) +
+  geom_point(color = "blue") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  labs(
+    x = "City",
+    y = "Proportion of Unsolved Homicides",
+    title = "Proportion of Unsolved Homicides with 95% Confidence Intervals"
+  ) +
+  theme_minimal() +
+  coord_flip()
+```
+
+
+
 
